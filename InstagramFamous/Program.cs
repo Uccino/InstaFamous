@@ -8,19 +8,22 @@ namespace InstagramFamous
 {
     class Program
     {
+        internal enum LOGLEVEL { INFO, DEBUG, WARNING }
+
         static void Main()
         {
             // Attempt to load the settings before continueing
-            SendMessage("Loading settings.json");
+            SendMessage("Loading settings.json", LOGLEVEL.INFO);
             if (SettingsManager.LoadSettings("settings.json"))
             {
-                SendMessage("Successfully loaded the settings");
+                SendMessage("Successfully loaded the settings", LOGLEVEL.INFO);
 
                 // Attempting to get the latest reddit posts of given subreddit.
 
                 FileManager fileClient = new FileManager();
                 InstagramManager instaClient = new InstagramManager();
                 RedditManager redditClient = new RedditManager();
+                string imageDirectory = Properties.Config.Default.FileDirectory;
 
                 while (true)
                 {
@@ -33,35 +36,44 @@ namespace InstagramFamous
                     }
                     catch (Exception ex)
                     {
-                        SendMessage("There was a fatal error, writing it to the error log.");
+                        SendMessage("There was a fatal error, writing it to the error log.", LOGLEVEL.DEBUG);
+                        SendMessage(ex.ToString(), LOGLEVEL.WARNING);
                         break;
                     }
 
                     // Filter all of the posts before downloading.
                     List<Dictionary<string, string>> lstRedditApproved = redditClient.FilterPosts(redditPosts);
-                    SendMessage($"Got {lstRedditApproved.Count} approved posts!");
-                    SendMessage("Attempting to download posts");
+                    SendMessage($"Got {lstRedditApproved.Count} approved posts!", LOGLEVEL.DEBUG);
+                    SendMessage("Attempting to download posts", LOGLEVEL.INFO);
 
-                    // Download all of the posts                    
+                    // Attempt to download all the approved posts                   
                     foreach (var Post in lstRedditApproved)
                     {
-                        fileClient.DownloadPost(Post);
+                        try
+                        {
+                            fileClient.DownloadPost(Post);
+                            SendMessage($"Downloading {Post["Link"]}", LOGLEVEL.DEBUG);
+                        }
+                        catch (Exception ex)
+                        {
+                            SendMessage($"An error occured while downloading {Post["Link"]} {Environment.NewLine} {ex.ToString()}", LOGLEVEL.WARNING);
+                            throw;
+                        }
+
                     }
 
-                    // Change post picture format
+                    // Get all the files in our directory and change the format from .png to .jpg
                     string[] filePaths = Directory.GetFiles(Properties.Config.Default.FileDirectory);
-                    // Get all of the files that are in PNG format
                     string[] pngList = Array.FindAll(filePaths, item => item.Contains(".png"));
-                    string imageDirectory = Properties.Config.Default.FileDirectory;
 
                     // Add padding to each image
-                    SendMessage("Changing picture formats.");
+                    SendMessage("Changing picture formats.", LOGLEVEL.INFO);
                     foreach (string filePath in pngList)
                     {
                         fileClient.ChangePictureFormat(filePath);
                     }
                     // Add padding to posts
-                    SendMessage("Resizing images");
+                    SendMessage("Resizing images", LOGLEVEL.INFO);
                     foreach (string filePath in Directory.EnumerateFiles(imageDirectory))
                     {
                         fileClient.AddPaddingToPicture(filePath);
@@ -73,41 +85,49 @@ namespace InstagramFamous
                                 fileClient.ResizeImage(filePath);
                             }
                         }
-                        fileClient.AddPaddingToPicture(filePath);
                     }
-                    SendMessage("Removing metadata");
-                    // Remove EXIF in posts
+                    SendMessage("Removing metadata", LOGLEVEL.INFO);
+                    // Remove EXIF in posts using ImageMagick.NET
                     foreach (string filePath in Directory.EnumerateFiles(imageDirectory))
                     {
-                        fileClient.RemoveExif(filePath);
+                        try
+                        {
+                            fileClient.RemoveExif(filePath);
+                        }
+                        catch (Exception e)
+                        {
+                            SendMessage($"An error occured while trying to remove EXIF data on {filePath} {Environment.NewLine} {e.ToString()}", LOGLEVEL.WARNING);
+                            throw;
+                        }
+
                     }
-                    SendMessage("Uploading images to instagram.");
+                    SendMessage("Uploading images to instagram.", LOGLEVEL.INFO);
                     // Upload to instagram.
                     int timeToWait = GetWaitTime(imageDirectory);
-                    SendMessage("Attempting login.");
+                    SendMessage("Attempting login.", LOGLEVEL.INFO);
+
                     if (instaClient.Login())
                     {
-                        SendMessage("Logged in to instagram.");
+                        SendMessage("Logged in to instagram.", LOGLEVEL.INFO);
                         foreach (string filePath in Directory.EnumerateFiles(imageDirectory))
                         {
                             if (instaClient.UploadPicture(filePath))
                             {
-                                SendMessage("Succesfully uploaded picture.");
+                                SendMessage("Succesfully uploaded picture.", LOGLEVEL.INFO);
                             }
                             else
                             {
-                                SendMessage("Unable to upload the picture to instagram.");
+                                SendMessage("Unable to upload the picture to instagram.", LOGLEVEL.WARNING);
                             }
 
-                            SendMessage("Waiting untill we can upload the next picture.");
+                            SendMessage("Waiting untill we can upload the next picture.", LOGLEVEL.INFO);
                             System.Threading.Thread.Sleep(timeToWait);
                         }
-
-                        instaClient.Logout();
                     }
                     else
                     {
-                        SendMessage("Unable to login to instagram!");
+                        SendMessage("Unable to login to instagram, check the username / password combination",LOGLEVEL.WARNING);
+                        Console.ReadKey();
                     }
                 }
             }
@@ -118,20 +138,31 @@ namespace InstagramFamous
         /// </summary>
         /// <param name="message">Message that you want to display</param>
         /// <param name="WriteLine">Set to true to use Console.WriteLine, set to false to use Console.Write </param>
-        internal static void SendMessage(string message, bool WriteLine = true)
+        internal static void SendMessage(string message, LOGLEVEL level)
         {
-            string Message = ($"[{DateTime.Now.ToShortTimeString()}] {message} ");
-            if (WriteLine)
+            string Message = ($"[{DateTime.Now.ToShortTimeString()}][{level.ToString()}] {message} ");
+
+            switch (level)
             {
-                Console.WriteLine(Message);
-            }
-            else
-            {
-                Console.Write(Message);
+                case LOGLEVEL.INFO:
+                    Console.WriteLine(Message);
+                    break;
+                case LOGLEVEL.DEBUG:
+#if DEBUG
+                    Console.WriteLine(Message);
+#endif
+                    break;
+                case LOGLEVEL.WARNING:
+#if DEBUG
+                    Console.WriteLine(Message);
+#endif
+                    Console.WriteLine("An error occured, check the logfiles for more info.");
+                    HandleError(Message);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(level), level, null);
             }
 
-            // TODO
-            // Write all the entries to a database for logging purposes
         }
 
         /// <summary>
@@ -146,7 +177,26 @@ namespace InstagramFamous
             var minutesToWait = (24.0 / fileCount) * 60;
             int milisecondsToWait = Convert.ToInt32(minutesToWait * 60000);
 
+            SendMessage($"Time to wait: {minutesToWait} minutes",LOGLEVEL.DEBUG);
             return milisecondsToWait;
+        }
+
+        private static void HandleError(string Message)
+        {
+            if (!Directory.Exists("Logs"))
+            {
+                Directory.CreateDirectory("Logs");
+            }
+
+            using (StreamWriter logWriter = new StreamWriter($"Logs/Logfile {DateTime.Now.ToFileTime()} .txt"))
+            {
+                logWriter.Write(DateTime.Now.ToLongTimeString());
+                logWriter.Write(Environment.NewLine);
+                logWriter.Write(Message);
+
+                logWriter.Flush();
+            }
+
         }
     }
 }

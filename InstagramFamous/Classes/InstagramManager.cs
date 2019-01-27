@@ -39,19 +39,26 @@ namespace InstagramFamous.Classes
         {
             if (!InstagramClient.IsUserAuthenticated)
             {
-                var loginResult = InstagramClient.LoginAsync();
-                if (loginResult.Result.Succeeded)
+                try
                 {
-                    if (InstagramClient.IsUserAuthenticated)
+                    var loginResult = InstagramClient.LoginAsync();
+                    if (loginResult.Result.Succeeded)
                     {
-                        return true;
+                        if (InstagramClient.IsUserAuthenticated)
+                        {
+                            return true;
+                        }
+                        else
+                        {
+                            return false;
+                        }
                     }
                     else
                     {
                         return false;
                     }
                 }
-                else
+                catch (Exception)
                 {
                     return false;
                 }
@@ -112,7 +119,6 @@ namespace InstagramFamous.Classes
             {
                 Thread.Sleep(1000);
             }
-            Console.WriteLine(x.Result);
             if (x.Result.Succeeded)
             {
                 return true;

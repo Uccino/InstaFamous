@@ -180,8 +180,7 @@ namespace InstagramFamous.Classes
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
-                throw;
+                throw e;
             }
         }
     }
